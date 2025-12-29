@@ -57,4 +57,5 @@ jobs:
     - name: Test
       working-directory: cpp
       run: ctest --preset clang-deb-ninja
-        
+    # Подключение SAST на наш пайплайн
+    
