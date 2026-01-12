@@ -15,10 +15,66 @@ on:
         description: 'Фамилия'
         required: true
         default: 'Харламов'
+sast-and-secrets:
+  stage: test
+  image: CMake Build
+  script:
+    # Устанавливаем необходимые инструменты правильным способом
+    - apt-get update && apt-get install -y git
+    - pip install semgrep==1.45.0
+    - wget -qO- https://github.com/gitleaks/gitleaks/releases/download/v8.18.0/gitleaks_8.18.0_linux_x64.tar.gz | tar xz
+    - mv gitleaks /usr/local/bin/
 
+    # 1. Сканирование на секреты. Провалит пайплайн, если что-то найдено.
+    - echo "Running Gitleaks for secrets scanning..."
+    - gitleaks detect --source . --verbose --no-git
+
+    # 2. Статический анализ кода (SAST). Не проваливает пайплайн (allow_failure: true).
+    # Результаты просто выводятся в лог для анализа.
+    - echo "Running Semgrep for SAST..."
+    - semgrep scan --config="p/default" --error
+  allow_failure: true # Важно! Не блокируем разработчика на начальном этапе.
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
 env:
   # Здесь можно настроить тип сборки CMake
   BUILD_TYPE: Release
+scan-artifacts:
+  stage: scan
+  image:
+    name: aquasec/trivy:0.48.0
+    entrypoint: [""]
+  script:
+    - trivy --version
+    # 1. Загружаем образ из артефакта
+    - trivy image --input my-app.tar
+    # 2. Сканируем образ на уязвимости.
+    # --exit-code 1: провалить пайплайн, если найдены CRITICAL или HIGH уязвимости.
+    # --severity: какие уровни уязвимостей искать.
+    - echo "Scanning Docker image for vulnerabilities..."
+    - trivy image --input my-app.tar --exit-code 1 --severity CRITICAL,HIGH --skip-db-update=false
+    # 3. Сканируем файловую систему на уязвимости в зависимостях (SCA).
+    - echo "Scanning filesystem for dependencies vulnerabilities..."
+    - trivy fs . --exit-code 0 --severity MEDIUM,LOW # Просто выводим отчет, не валим сборку
+
+    # 4. Дополнительное сканирование IaC с помощью Trivy
+    - echo "Scanning IaC configurations..."
+    - trivy config . --exit-code 0
+  dependencies:
+    - build-app
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+# Мониторинг эффективности безопасности
+monitor-security:
+  stage: monitor
+  image: alpine:latest
+  script:
+    - echo "Security scan completed at $(date)"
+    - echo "Total time: $(($(date +%s) - $CI_PIPELINE_CREATED_AT))"
+    # Здесь можно добавить отправку метрик в нашу систему мониторинга
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: always
 
 jobs:
   build:
