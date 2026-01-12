@@ -1,0 +1,7 @@
+rules:
+  - id: custom-sql-injection-exclusion
+    patterns:
+      - pattern-not: |
+          $QUERY = "SELECT * FROM users WHERE id IN (" + TRUSTED_IDS + ")"
+    message: SQL injection risk
+    severity: ERROR
